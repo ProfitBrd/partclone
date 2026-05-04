@@ -229,6 +229,25 @@ extern void progress_update(struct progress_bar *prog, unsigned long long copied
     memset(&prog_stat, 0, sizeof(prog_stat_t));
     calculate_speed(prog, copied, current, done, &prog_stat);
 
+/* === local: write progress to /tmp for external monitor === */
+    {
+        char path[64], path_tmp[64];
+        snprintf(path,     sizeof path,     "/tmp/partclone.%d.progress",     getpid());
+        snprintf(path_tmp, sizeof path_tmp, "/tmp/partclone.%d.progress.tmp", getpid());
+        FILE *p = fopen(path_tmp, "w");
+        if (p) {
+            fprintf(p, "%d %.2f %.2f %s %s\n",
+                    (prog->flag == BITMAP ? 0 : 1),
+                    prog_stat.percent,
+                    prog_stat.total_percent,
+                    prog_stat.Eformated,
+                    prog_stat.Rformated);
+            fclose(p);
+            rename(path_tmp, path);
+        }
+    }
+    /* === end local addition === */
+
     if (done != 1){
 	prog->resolution_time = time(0);
 	setlocale(LC_ALL, "");

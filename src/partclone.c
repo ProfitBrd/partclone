@@ -2116,6 +2116,23 @@ void print_file_system_info(file_system_info fs_info, cmd_opt opt) {
 
 	log_mesg(0, 0, 1, debug, _("Block size:   %i Byte\n"), block_s);
 	log_mesg(2, 0, 1, debug, _("Used Blocks in Super-Block:   %llu Blocks\n"), superBlockUsedBlocks);
+
+	/* === local: write filesystem info to /tmp for external monitor === */
+    {
+        char path[64], path_tmp[64];
+        snprintf(path,     sizeof path,     "/tmp/partclone.%d.info",     getpid());
+        snprintf(path_tmp, sizeof path_tmp, "/tmp/partclone.%d.info.tmp", getpid());
+        FILE *p = fopen(path_tmp, "w");
+        if (p) {
+            fprintf(p, "%llu %u %llu\n",
+                    (unsigned long long)used,
+                    block_s,
+                    (unsigned long long)total);
+            fclose(p);
+            rename(path_tmp, path);
+        }
+    }
+    /* === end local addition === */
 }
 
 /// print image info
