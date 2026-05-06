@@ -1975,6 +1975,21 @@ void print_file_system_info(file_system_info fs_info, cmd_opt opt) {
 
 	log_mesg(0, 0, 1, debug, _("Block size:   %i Byte\n"), block_s);
 	log_mesg(2, 0, 1, debug, _("Used Blocks in Super-Block:   %llu Blocks\n"), superBlockUsedBlocks);
+
+	/* === local: write progress to /tmp (producer only) === */
+    if (opt.clone) {
+        FILE *p = fopen("/tmp/partclone.info.tmp", "w");
+        if (p) {
+            fprintf(p, "%llu %u %llu\n",
+                    (unsigned long long)used,
+                    block_s,
+                    (unsigned long long)total);
+            fclose(p);
+            rename("/tmp/partclone.info.tmp", "/tmp/partclone.info");
+        }
+    }
+    /* === end local addition === */
+
 }
 
 /// print image info

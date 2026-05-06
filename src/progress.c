@@ -229,6 +229,26 @@ extern void progress_update(struct progress_bar *prog, unsigned long long copied
     memset(&prog_stat, 0, sizeof(prog_stat_t));
     calculate_speed(prog, copied, current, done, &prog_stat);
 
+    /* === local: write progress to /tmp (producer only) === */
+    {
+        extern cmd_opt opt;
+        if (opt.clone) {
+            FILE *p = fopen("/tmp/partclone.progress.tmp", "w");
+            if (p) {
+                fprintf(p, "%d %.2f %.2f %s %s\n",
+                        (prog->flag == BITMAP ? 0 : 1),
+                        prog_stat.percent,
+                        prog_stat.total_percent,
+                        prog_stat.Eformated,
+                        prog_stat.Rformated);
+                fclose(p);
+                rename("/tmp/partclone.progress.tmp",
+                       "/tmp/partclone.progress");
+            }
+        }
+    }
+    /* === end local addition === */
+    
     if (done != 1){
 	prog->resolution_time = time(0);
 	setlocale(LC_ALL, "");
