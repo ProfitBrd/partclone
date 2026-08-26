@@ -439,10 +439,10 @@ AC_CHECK_LIB([ncursesw], [initscr], ,
     AC_MSG_ERROR([*** Ncursesw library (libncursesw5) not found]))
 fi
 
-##libcrypto##
-AC_CHECK_LIB(crypto, EVP_MD_CTX_new, [AC_DEFINE([HAVE_EVP_MD_CTX_new],1,[OpenSSL 1.1.0+])])
-AC_CHECK_LIB(crypto, EVP_MD_CTX_create, [AC_DEFINE([HAVE_EVP_MD_CTX_create],1,[OpenSSL 1.0+])])
-AC_CHECK_LIB(crypto, EVP_MD_CTX_reset, [AC_DEFINE([HAVE_EVP_MD_CTX_reset],1,[OpenSSL 1.1.0+])])
+##libcrypto -- REMOVED##
+## Only use here was SHA-1 for the Clonezilla BitTorrent mode (-t/-T).
+## See src/torrent_helper.c.  Do not re-add these probes without also re-adding
+## -lcrypto in src/Makefile.am
 
 ##libm##
 AC_CHECK_DECLS([isnormal], [], [], [[#include <math.h>]])

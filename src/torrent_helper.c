@@ -13,104 +13,47 @@
 
 #include "torrent_helper.h"
 
+/*
+ * BitTorrent piece hashing is DISABLED in this fork.
+ *
+ *
+ * Scope of the loss: `-t` (torrent_only) and `-T` (blockfile) mode.  Those
+ * exist so a Clonezilla SERVER can seed disk images over BitTorrent to a lab
+ * of PCs.  Nothing else changes -- in particular the image format and its
+ * CRC32 integrity check (src/checksum.c) never touched OpenSSL and are
+ * byte-for-byte identical to before.
+ *
+ * torrent_init() is the single entry point: main.c only reaches the other
+ * torrent_* functions after calling it, and only under `opt.blockfile == 1`.
+ * So failing here, loudly, makes the whole feature unreachable and makes it
+ * impossible to emit a torrent.info full of wrong hashes.
+ *
+ * To restore it: drop in any public-domain SHA-1 (about 90 lines), point
+ * these three functions at it, and leave configure.ac and Makefile.am alone.
+ */
 void torrent_init(torrent_generator *torrent, FILE *tinfo)
 {
-	torrent->PIECE_SIZE = DEFAULT_PIECE_SIZE;
-	torrent->length = 0;
-	torrent->tinfo = tinfo;
-#if !defined(HAVE_EVP_MD_CTX_methods)
-	SHA1_Init(&torrent->ctx);
-#elif defined(HAVE_EVP_MD_CTX_new)
-	torrent->ctx = EVP_MD_CTX_new();
-	EVP_DigestInit(torrent->ctx, EVP_sha1());
-#elif defined(HAVE_EVP_MD_CTX_create)
-	torrent->ctx = EVP_MD_CTX_create();
-	EVP_DigestInit(torrent->ctx, EVP_sha1());
-#endif
+	(void)torrent;
+	(void)tinfo;
+	fprintf(stderr,
+	        "partclone: BitTorrent mode (-t/-T) is not available in this build.\n"
+	        "           SHA-1 came from OpenSSL, which was removed for licence\n"
+	        "           reasons.  Ordinary clone/restore/chkimg are unaffected.\n");
+	exit(1);
 }
 
+/* Unreachable: main.c only calls these after torrent_init(), which exits.
+ * They remain as definitions purely so main.c still links. */
 void torrent_update(torrent_generator *torrent, void *buffer, size_t length)
 {
-	unsigned long long sha_length = torrent->length;
-	unsigned long long BT_PIECE_SIZE = torrent->PIECE_SIZE;
-	unsigned long long sha_remain_length = BT_PIECE_SIZE - sha_length;
-	unsigned long long buffer_remain_length = length;
-	unsigned long long buffer_offset = 0;
-
-	FILE *tinfo = torrent->tinfo;
-	int x = 0;
-
-	while (buffer_remain_length > 0) {
-		sha_remain_length = BT_PIECE_SIZE - sha_length;
-		if (sha_remain_length <= 0) {
-			// finish a piece
-#if defined(HAVE_EVP_MD_CTX_methods)
-			EVP_DigestFinal(torrent->ctx, torrent->hash, NULL);
-#else
-			SHA1_Final(torrent->hash, &torrent->ctx);
-#endif
-			fprintf(tinfo, "sha1: ");
-			for (x = 0; x < 20 /* SHA_DIGEST_LENGTH */; x++) {
-				fprintf(tinfo, "%02x", torrent->hash[x]);
-			}
-			fprintf(tinfo, "\n");
-			// start for next piece;
-#if defined(HAVE_EVP_MD_CTX_methods)
-			EVP_MD_CTX_reset(torrent->ctx);
-			EVP_DigestInit(torrent->ctx, EVP_sha1());
-#else
-			SHA1_Init(&torrent->ctx);
-#endif
-			sha_length = 0;
-			sha_remain_length = BT_PIECE_SIZE;
-		}
-		if (buffer_remain_length <= 0) {
-			break;
-		}
-		else if (sha_remain_length > buffer_remain_length) {
-#if defined(HAVE_EVP_MD_CTX_methods)
-			EVP_DigestUpdate(torrent->ctx, buffer + buffer_offset, buffer_remain_length);
-#else
-			SHA1_Update(&torrent->ctx, buffer + buffer_offset, buffer_remain_length);
-#endif
-			sha_length += buffer_remain_length;
-			break;
-		}
-		else {
-#if defined(HAVE_EVP_MD_CTX_methods)
-			EVP_DigestUpdate(torrent->ctx, buffer + buffer_offset, sha_remain_length);
-#else
-			SHA1_Update(&torrent->ctx, buffer + buffer_offset, sha_remain_length);
-#endif
-			buffer_offset += sha_remain_length;
-			buffer_remain_length -= sha_remain_length;
-			sha_length += sha_remain_length;
-		}
-	}
-
-	torrent->length = sha_length;
+	(void)torrent;
+	(void)buffer;
+	(void)length;
 }
 
 void torrent_final(torrent_generator *torrent)
 {
-	int x = 0;
-
-	if (torrent->length) {
-#if !defined(HAVE_EVP_MD_CTX_methods)
-		SHA1_Final(torrent->hash, &torrent->ctx);
-#elif defined(HAVE_EVP_MD_CTX_new)
-		EVP_DigestFinal(torrent->ctx, torrent->hash, NULL);
-		EVP_MD_CTX_free(torrent->ctx);
-#elif defined(HAVE_EVP_MD_CTX_create)
-		EVP_DigestFinal(torrent->ctx, torrent->hash, NULL);
-		EVP_MD_CTX_destroy(torrent->ctx);
-#endif
-		fprintf(torrent->tinfo, "sha1: ");
-		for (x = 0; x < 20 /* SHA_DIGEST_LENGTH */; x++) {
-			fprintf(torrent->tinfo, "%02x", torrent->hash[x]);
-		}
-		fprintf(torrent->tinfo, "\n");
-	}
+	(void)torrent;
 }
 
 void torrent_start_offset(torrent_generator *torrent, unsigned long long offset)
