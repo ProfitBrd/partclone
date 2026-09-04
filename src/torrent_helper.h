@@ -22,29 +22,17 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-/* SHA1 for torrent info */
-#if (defined(HAVE_EVP_MD_CTX_new) || defined(HAVE_EVP_MD_CTX_create)) && defined(HAVE_EVP_MD_CTX_reset)
-#define HAVE_EVP_MD_CTX_methods
-#endif
-#if defined(HAVE_EVP_MD_CTX_methods)
-#include <openssl/evp.h>
-#else
-#include <openssl/sha.h>
-#endif
+/* SHA1 for torrent info -- REMOVED, see torrent_helper.c for why. */
 
 #define DEFAULT_PIECE_SIZE (16ULL * 1024 * 1024)
 
 typedef struct {
 	unsigned long long PIECE_SIZE;
-	unsigned char hash[20]; /* SHA_DIGEST_LENGTH, only present in <openssl/sha.h> */
+	unsigned char hash[20]; /* was SHA_DIGEST_LENGTH; kept so the struct shape
+	                         * and any future SHA-1 drop-in stay unchanged */
 	/* fd for torrent.info. You should close fd yourself */
 	FILE *tinfo;
-	/* remember the length for a piece size */
-#if defined(HAVE_EVP_MD_CTX_methods)
-	EVP_MD_CTX *ctx;
-#else
-	SHA_CTX ctx;
-#endif
+	/* the SHA context member is gone with libcrypto */
 	size_t length;
 } torrent_generator;
 

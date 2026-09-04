@@ -243,8 +243,6 @@ void usage(void) {
 		"    -b,  --dev-to-dev       Local device to device copy mode\n"
 		"    -x,  --compresscmd CMD  Start CMD as an output pipe to compress the cloned image\n"
 		"    -n,  --note NOTE        Display Message Note (128 words)\n"
-#else
-		"    -S,  --device-size      Define device size\n"
 #endif
 		"    -D,  --domain           Create ddrescue domain log from source device\n"
 		"         --offset_domain=X  Add offset X (bytes) to domain log values\n"
@@ -253,10 +251,6 @@ void usage(void) {
 		"                            where X:\n"
 		"                            0: No checksum (no slowdown, smallest image)\n"
 		"                            1: CRC32 (Fast to compute, basic detection)\n"
-#ifdef HAVE_XXHASH
-		"                            2: XXH64 (Extremely fast, modern detection)\n"
-		"                            3: XXH128 (Strong and extremely fast, best detection)\n"
-#endif
 		"    -kX  --blocks-per-checksum=X\n"
 		"                            Write one checksum for every X blocks\n"
 		"    -K,  --no-reseed        Do not reseed the checksum at each write (TEST)\n"
@@ -309,15 +303,6 @@ int convert_to_checksum_mode(unsigned long mode) {
 		return CSM_CRC32;
 		break;
 
-#ifdef HAVE_XXHASH
-	case 2:
-		return CSM_XXH64;
-		break;
-	case 3:
-		return CSM_XXH128;
-		break;
-#endif
-
 	// note: we do not allow the user to use CSM_CRC32_0001. That mode exist only
 	// to support image created in format 0001.
 
@@ -355,7 +340,7 @@ void parse_options(int argc, char **argv, cmd_opt* opt) {
 #elif RESTORE
 	static const char *sopt = "-hvd::L:o:O:s:f:CFINiqWBz:E:n:Tt";
 #elif DD
-	static const char *sopt = "-hvd::L:o:O:s:f:CFINiqWBz:E:n:TtS:";
+	static const char *sopt = "-hvd::L:o:O:s:f:CFINiqWBz:E:n:Tt";
 #else
 	static const char *sopt = "-hvd::L:cx:brDo:O:s:f:RCFINiqWBz:E:a:k:Kn:Tt";
 #endif
@@ -386,8 +371,6 @@ void parse_options(int argc, char **argv, cmd_opt* opt) {
 		{ "compresscmd",	required_argument,	NULL,	'x' },
 		{ "restore",		no_argument,		NULL,   'r' },
 		{ "dev-to-dev",		no_argument,		NULL,   'b' },
-#else
-		{ "device-size",	required_argument,	NULL,   'S' },
 #endif
 		{ "domain",		no_argument,		NULL,   'D' },
 		{ "offset_domain",	required_argument,	NULL,   OPT_OFFSET_DOMAIN },
@@ -531,11 +514,6 @@ void parse_options(int argc, char **argv, cmd_opt* opt) {
 			case 'b':
 				opt->dd++;
 				mode=1;
-				break;
-#else
-			case 'S':
-				assert(optarg != NULL);
-				opt->device_size = (off_t)strtoull(optarg, NULL, 0);
 				break;
 #endif
 			case 'D':
@@ -946,41 +924,10 @@ void load_image_desc_v1(file_system_info* fs_info, image_options* img_opt,
 	fs_info->totalblock  = fs_info_v1.totalblock;
 	fs_info->usedblocks  = fs_info_v1.usedblocks;
 
-	/* Validate totalblock to prevent BITS_TO_BYTES overflow */
-	if (fs_info->totalblock > ULLONG_MAX - 7) {
-		log_mesg(0, 1, 1, opt->debug,
-			"Invalid image: totalblock value (%llu) would cause integer overflow\n",
-			(unsigned long long)fs_info->totalblock);
-	}
+	dev_size = fs_info->totalblock * fs_info->block_size;
+	if (fs_info->device_size != dev_size) {
 
-	if (fs_info->block_size == 0 || fs_info->block_size > MAX_BLOCK_SIZE) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image v1: block_size (%u) is invalid or too large.\n", fs_info->block_size);
-	}
-
-	if (fs_info->usedblocks > fs_info->totalblock) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image v1: usedblocks (%llu) is larger than totalblock (%llu).\n", fs_info->usedblocks, fs_info->totalblock);
-	}
-
-	// Check to prevent overflow when casting to signed long long
-	if (fs_info->totalblock > LLONG_MAX) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image v1: totalblock (%llu) exceeds signed long long max value.\n", fs_info->totalblock);
-	}
-
-	// Check for a reasonable totalblock limit for bitmap allocation (max 1TB bitmap)
-	if (fs_info->totalblock > (1024ULL * 1024 * 1024 * 1024 * 8)) { // 1TB bitmap size
-		log_mesg(0, 1, 1, opt->debug, "Invalid image v1: totalblock (%llu) is excessively large for bitmap allocation.\n", fs_info->totalblock);
-	}
-
-	// Check for multiplication overflow before calculating total device size
-	if (fs_info->block_size > 0 && fs_info->totalblock > ULLONG_MAX / fs_info->block_size) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image v1: totalblock * block_size would cause an integer overflow.\n");
-	}
-
-	unsigned long long calculated_size = fs_info->totalblock * fs_info->block_size;
-	if (calculated_size > fs_info->device_size) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image v1: calculated filesystem size is larger than device size.\n");
-	} else if (calculated_size < fs_info->device_size) {
-		log_mesg(1, 0, 0, opt->debug, "INFO: adjusted device size reported by the image [%llu -> %llu]\n", fs_info->device_size, calculated_size);
+		log_mesg(1, 0, 0, opt->debug, "INFO: adjusted device size reported by the image [%llu -> %llu]\n", fs_info->device_size, dev_size);
 		fs_info->device_size = dev_size;
 	}
 
@@ -996,50 +943,7 @@ void load_image_desc_v2(file_system_info* fs_info, image_options* img_opt,
 		log_mesg(0, 1, 1, opt->debug, "The image have been created from an incompatible architecture\n");
 
 	memcpy(fs_info, &fs_info_v2, sizeof(file_system_info_v2));
-
-	if (fs_info->block_size == 0 || fs_info->block_size > MAX_BLOCK_SIZE) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: block_size (%u) is invalid or too large.\n", fs_info->block_size);
-	}
 	memcpy(img_opt, &img_opt_v2, sizeof(image_options_v2));
-
-	if (fs_info->usedblocks > fs_info->totalblock) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: usedblocks (%llu) is larger than totalblock (%llu).\n", fs_info->usedblocks, fs_info->totalblock);
-	}
-
-	if (get_checksum_size(img_opt->checksum_mode, opt->debug) != img_opt->checksum_size) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: checksum_size (%u) does not match checksum_mode (%d).\n", img_opt->checksum_size, img_opt->checksum_mode);
-	}
-
-	// Check to prevent overflow when casting to signed long long
-	if (fs_info->totalblock > LLONG_MAX) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: totalblock (%llu) exceeds signed long long max value.\n", fs_info->totalblock);
-	}
-
-	// Check for a reasonable totalblock limit for bitmap allocation (max 1TB bitmap)
-	if (fs_info->totalblock > (1024ULL * 1024 * 1024 * 1024 * 8)) { // 1TB bitmap size
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: totalblock (%llu) is excessively large for bitmap allocation.\n", fs_info->totalblock);
-	}
-
-	// Check for multiplication overflow before calculating total device size
-	if (fs_info->block_size > 0 && fs_info->totalblock > ULLONG_MAX / fs_info->block_size) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: totalblock * block_size would cause an integer overflow.\n");
-	}
-
-	unsigned long long calculated_size = fs_info->totalblock * fs_info->block_size;
-	if (calculated_size > fs_info->device_size) {
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: calculated filesystem size is larger than device size.\n");
-	}
-
-
-	// Validate blocks_per_checksum to prevent divide-by-zero
-	if (img_opt->checksum_mode != CSM_NONE && img_opt->blocks_per_checksum == 0)
-		log_mesg(0, 1, 1, opt->debug, "Invalid image: blocks_per_checksum cannot be 0 when checksum is enabled\n");
-	/* Validate totalblock to prevent BITS_TO_BYTES overflow */
-	if (fs_info->totalblock > ULLONG_MAX - 7) {
-		log_mesg(0, 1, 1, opt->debug,
-			"Invalid image: totalblock value (%llu) would cause integer overflow\n",
-			(unsigned long long)fs_info->totalblock);
-	}
 }
 
 /**
@@ -1062,23 +966,20 @@ void load_image_desc(int* ret, cmd_opt* opt, image_head_v2* img_head, file_syste
 	if (memcmp(buf_v2.head.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE))
 		log_mesg(0, 1, 1, debug, "This is not partclone image.\n");
 
-	assert(buf_v2.head.version != NULL);
+    assert(buf_v2.head.version != NULL);
 	img_version = atol(buf_v2.head.version);
 
 	switch(img_version) {
 
 	case 0x0001: {
-		image_desc_v1 buf_v1;
-
-		// copy the first part of the header
-		memcpy(&buf_v1, &buf_v2, sizeof(image_desc_v2));
+		const image_desc_v1* buf_v1 = (image_desc_v1*)&buf_v2;
+		image_options_v1 extra;
 
 		// read the extra bytes
-		char* p = (char*)&buf_v1;
-		if (read_all(ret, p + sizeof(image_desc_v2), sizeof(image_desc_v1) - sizeof(image_desc_v2), opt) == -1)
+		if (read_all(ret, extra.buff, sizeof(image_desc_v1) - sizeof(image_desc_v2), opt) == -1)
 			log_mesg(0, 1, 1, debug, "read image_hdr error=%d\n (%s)", r_size, strerror(errno));
 
-		load_image_desc_v1(fs_info, img_opt, buf_v1.head, buf_v1.fs_info, opt);
+		load_image_desc_v1(fs_info, img_opt, buf_v1->head, buf_v1->fs_info, opt);
 		memset(img_head, 0, sizeof(image_head_v2));
 		break;
 	}
@@ -1135,8 +1036,8 @@ void write_image_bitmap(int* ret, file_system_info fs_info, image_options img_op
 
 	case BM_BIT:
 	{
-		if (write_all(ret, (char*)bitmap, pc_BITS_TO_BYTES(fs_info.totalblock), opt) == -1)
-		    log_mesg(0, 1, 1, debug, "write bitmap to image error: %s\n", strerror(errno));
+		if (write_all(ret, (char*)bitmap, BITS_TO_BYTES(fs_info.totalblock), opt) == -1)
+			log_mesg(0, 1, 1, debug, "write bitmap to image error: %s\n", strerror(errno));
 		break;
 	}
 
@@ -1187,9 +1088,10 @@ void write_image_bitmap(int* ret, file_system_info fs_info, image_options img_op
 
 			init_crc32(&crc);
 
-			crc = crc32(crc, bitmap, pc_BITS_TO_BYTES(fs_info.totalblock));
+			crc = crc32(crc, bitmap, BITS_TO_BYTES(fs_info.totalblock));
+
 			if (write_all(ret, (char*)&crc, sizeof(crc), opt) != sizeof(crc))
-			    log_mesg(0, 1, 1, debug, "write bitmap to image error: %s\n", strerror(errno));
+				log_mesg(0, 1, 1, debug, "write bitmap to image error: %s\n", strerror(errno));
 			break;
 		}
 
@@ -1249,6 +1151,7 @@ unsigned long long get_partition_size(int* ret) {
 	} else {
 		log_mesg(0, 0, 0, debug, "fstat size error, Use option -C to disable size checking(Dangerous).\n");
 	}
+
 	return dest_size;
 }
 
@@ -1363,8 +1266,8 @@ unsigned long long get_bitmap_size_on_disk(const file_system_info* fs_info, cons
 	switch(img_opt->bitmap_mode)
 	{
 	case BM_BIT:
-	    size = pc_BITS_TO_BYTES(fs_info->totalblock);
-	    break;
+		size = BITS_TO_BYTES(fs_info->totalblock);
+		break;
 
 	case BM_BYTE:
 		size = fs_info->totalblock;
@@ -1454,7 +1357,8 @@ void check_free_space(char* path, unsigned long long size) {
 
 void check_mem_size(file_system_info fs_info, image_options img_opt, cmd_opt opt) {
 
-	const unsigned long long bitmap_size = pc_BITS_TO_BYTES(fs_info.totalblock);
+	const unsigned long long bitmap_size = BITS_TO_BYTES(fs_info.totalblock);
+
 	const uint32_t blkcs = img_opt.blocks_per_checksum;
 	const uint32_t block_size = fs_info.block_size;
 	const unsigned int buffer_capacity = opt.buffer_size > block_size ? opt.buffer_size / block_size : 1; // in blocks
@@ -1464,10 +1368,6 @@ void check_mem_size(file_system_info fs_info, image_options img_opt, cmd_opt opt
 	void *test_bitmap, *test_read, *test_write;
 
 	if (img_opt.checksum_mode != CSM_NONE) {
-
-		// Verify blocks_per_checksum is valid
-		if (blkcs == 0)
-			log_mesg(0, 1, 1, opt.debug, "Invalid image: blocks_per_checksum cannot be 0 when checksum is enabled\n");
 
 		unsigned long long cs_in_buffer = buffer_capacity / blkcs;
 
@@ -1493,7 +1393,8 @@ void check_mem_size(file_system_info fs_info, image_options img_opt, cmd_opt opt
 
 void load_image_bitmap_bits(int* ret, cmd_opt opt, file_system_info fs_info, unsigned long* bitmap) {
 
-	unsigned long long r_size, bitmap_size = pc_BITS_TO_BYTES(fs_info.totalblock);	uint32_t r_crc, crc;
+	unsigned long long r_size, bitmap_size = BITS_TO_BYTES(fs_info.totalblock);
+	uint32_t r_crc, crc;
 
 	r_size = read_all(ret, (char*)bitmap, bitmap_size, &opt);
 	if (r_size != bitmap_size)
@@ -1560,25 +1461,6 @@ void load_image_bitmap_bytes(int* ret, cmd_opt opt, file_system_info fs_info, un
 
 /// get bitmap from image file to restore data
 void load_image_bitmap(int* ret, cmd_opt opt, file_system_info fs_info, image_options img_opt, unsigned long* bitmap) {
-
-	struct stat st;
-	if (fstat(*ret, &st) == -1) {
-		log_mesg(0, 1, 1, opt.debug, "fstat failed: %s\n", strerror(errno));
-	}
-
-	// Only perform this check if the source is a regular file (seekable)
-	if (S_ISREG(st.st_mode)) {
-		off_t current_pos = lseek(*ret, 0, SEEK_CUR);
-		if (current_pos == -1) {
-			log_mesg(0, 1, 1, opt.debug, "lseek failed: %s\n", strerror(errno));
-		}
-		unsigned long long remaining_size = st.st_size - current_pos;
-		unsigned long long declared_bitmap_size = get_bitmap_size_on_disk(&fs_info, &img_opt, &opt);
-
-		if (declared_bitmap_size > remaining_size) {
-			log_mesg(0, 1, 1, opt.debug, "Invalid image: declared bitmap size (%llu) is larger than remaining file size (%llu).\n", declared_bitmap_size, remaining_size);
-		}
-	}
 
 	switch(img_opt.bitmap_mode) {
 
@@ -1866,14 +1748,12 @@ int write_block_file(char* target, char *buf, unsigned long long count, unsigned
 	    if (i < 0) {
 		log_mesg(1, 0, 1, debug, "%s: errno = %i(%s)\n",__func__, errno, strerror(errno));
 		if (errno != EAGAIN && errno != EINTR) {
-		    free(block_filename);
 		    return -1;
 		}
 	    } else if (i == 0) {
 		log_mesg(1, 0, 1, debug, "%s: nothing to read. errno = %i(%s)\n",__func__, errno, strerror(errno));
 		rescue_write_size = size - count;
 		log_mesg(1, 0, 0, debug, "%s: rescue write size = %llu\n",__func__, rescue_write_size);
-		free(block_filename);
 		return 0;
 	    } else {
 		count -= i;
@@ -1881,7 +1761,6 @@ int write_block_file(char* target, char *buf, unsigned long long count, unsigned
 		log_mesg(2, 0, 0, debug, "%s: %s %lli, %llu left.\n", __func__, "write block file", i, count);
 	    }
 	}
-    free(block_filename);
     close(torrent_fd);
     return size;
 }
@@ -1992,26 +1871,6 @@ int skip_blocks(int *fd, char *empty_buffer, unsigned long long empty_buffer_siz
 			++*block_id;
 	}
 	return 0;
-}
-
-void init_bt_info(bt_info_t * bt, char *target,
-			 unsigned int block_size,
-			 unsigned long long blocks_total)
-{
-	char torrent_name[PATH_MAX + 1] = { '\0' };
-	sprintf(torrent_name, "%s/torrent.info", target);
-	bt->tinfo = fopen(torrent_name, "w");
-	torrent_init(&bt->torrent, bt->tinfo);
-	fprintf(bt->tinfo, "block_size: %u\n", block_size);
-	fprintf(bt->tinfo, "blocks_total: %llu\n", blocks_total);
-}
-
-void update_bt_info(bt_info_t * bt, unsigned long long offset,
-			   char *buffer, unsigned long long length)
-{
-	torrent_start_offset(&bt->torrent, offset);
-	torrent_end_length(&bt->torrent, length);
-	torrent_update(&bt->torrent, buffer, length);
 }
 
 /// print options to log file
@@ -2130,6 +1989,7 @@ void print_file_system_info(file_system_info fs_info, cmd_opt opt) {
         }
     }
     /* === end local addition === */
+
 }
 
 /// print image info

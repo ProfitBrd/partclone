@@ -1,12 +1,6 @@
-AC_INIT([Partclone],[0.3.46],[thomas@clonezilla.org])
-
-#condition for CPU target
-AC_CANONICAL_TARGET
-AM_CONDITIONAL([X64], [test "$target_cpu" = x86_64])
+AC_INIT([Partclone],[0.3.37],[thomas@clonezilla.org])
 AM_INIT_AUTOMAKE([-Wall foreign])
-AC_CONFIG_MACRO_DIRS([m4])
-LT_INIT
-AM_GNU_GETTEXT_VERSION([0.19])
+AM_GNU_GETTEXT_VERSION([0.16.1])
 AM_GNU_GETTEXT([external])
 AC_PROG_CC
 AM_PROG_CC_C_O
@@ -14,7 +8,6 @@ AM_PROG_AS
 AC_PROG_INSTALL
 AC_PATH_PROG(RM, rm, rm)
 AC_PROG_LN_S
-AC_PROG_MKDIR_P
 
 # Enable large file support.
 AC_SYS_LARGEFILE
@@ -59,56 +52,8 @@ if test "x$GCC" = "xyes"; then
   esac
 fi
 
-##static linking##
-AC_ARG_ENABLE([static-linking],
-    AS_HELP_STRING(
-        [--enable-static-linking],
-        [enable static linking])
-)
-AM_CONDITIONAL(ENABLE_STATIC, test "$enable_static_linking" = yes)
-if test "$enable_static_linking" = yes; then
-  AC_DEFINE([BTRFS_STATIC_BUILD], [1], [Define if building btrfs statically with system libs])
-fi
-
-dnl Check for uuid
-PKG_CHECK_MODULES([UUID], [uuid], [], [AC_MSG_ERROR([uuid library not found])])
-
-## Intel ISA-L ##
-AC_ARG_ENABLE([isal],
-    AS_HELP_STRING(
-        [--enable-isal],
-        [enable Intel ISA-L for optimized CRC32])
-)
-## libisal do not have static linking now(20251113) ##
-if test "$enable_isal" = "yes" -a "$enable_static_linking" != yes; then
-    dnl Check for Intel ISA-L (for optimized CRC32)
-    AS_MESSAGE([checking  for isal library ... ...])
-    PKG_CHECK_MODULES([ISAL], [libisal], [HAVE_ISAL=1], [HAVE_ISAL=0])
-    if test "$HAVE_ISAL" = "1"; then
-        AC_DEFINE([HAVE_ISAL], [1], [Intel ISA-L library available])
-    else
-        AC_MSG_ERROR([*** Intel ISA-L library (libisal) not found])
-    fi
-fi
-
-## xxhash ##
-AC_ARG_ENABLE([xxhash],
-    AS_HELP_STRING(
-        [--disable-xxhash],
-        [disable xxhash for checksum])
-)
-AM_CONDITIONAL(ENABLE_XXHASH, test "$enable_xxhash" != no)
-if test "$enable_xxhash" != no; then
-    dnl Check for xxhash
-    AS_MESSAGE([checking for xxhash library ...])
-    PKG_CHECK_MODULES([XXHASH], [libxxhash], [HAVE_XXHASH=1], [HAVE_XXHASH=0])
-    if test "$HAVE_XXHASH" = "1"; then
-        AC_DEFINE([HAVE_XXHASH], [1], [xxhash library available])
-    else
-        AC_MSG_ERROR([*** xxhash library (libxxhash) not found])
-    fi
-fi
-
+dnl Check for uuid 
+PKG_CHECK_MODULES(UUID, uuid,,exit)
 uuidcfg=`pkg-config --cflags --libs uuid`
 
 AC_ARG_ENABLE([fuse],
@@ -118,27 +63,25 @@ AC_ARG_ENABLE([fuse],
 )
 AM_CONDITIONAL(ENABLE_FUSE, test "$enable_fuse" = yes)
 if test "$enable_fuse" = "yes"; then
-AS_MESSAGE([checking  for FUSE3 Library and Header files ... ...])
-    PKG_CHECK_MODULES([FUSE], [fuse3], [], [AC_MSG_ERROR([FUSE3 library not found])])
-    fusecfg=`pkg-config --cflags --libs fuse3`
+AS_MESSAGE([checking  for FUSE Library and Header files ... ...])
+    PKG_CHECK_MODULES([FUSE], [fuse],,exit)
+    uuidcfg=`pkg-config --cflags --libs fuse`
 AC_MSG_CHECKING(version of FUSE)
 
 AC_COMPUTE_INT([fuse_version_major], [FUSE_MAJOR_VERSION], [[
-#define FUSE_USE_VERSION 31
 #ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 64
 #endif
-#include <fuse3/fuse.h>
+#include <fuse/fuse.h>
 ]],
-    AC_MSG_FAILURE([fuse3/fuse.h: could not determine 'FUSE_MAJOR_VERSION' value]))
+    AC_MSG_FAILURE([fuse/fuse.h: could not determine 'FUSE_MAJOR_VERSION' value]))
 AC_COMPUTE_INT([fuse_version_minor], [FUSE_MINOR_VERSION], [[
-#define FUSE_USE_VERSION 31
 #ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 64
 #endif
-#include <fuse3/fuse.h>
+#include <fuse/fuse.h>
 ]],
-    AC_MSG_FAILURE([fuse3/fuse.h: could not determine 'FUSE_MINOR_VERSION' value]))
+    AC_MSG_FAILURE([fuse/fuse.h: could not determine 'FUSE_MINOR_VERSION' value]))
 fuse_version="${fuse_version_major}.${fuse_version_minor}"
 AC_MSG_RESULT([$fuse_version])
 fi
@@ -160,8 +103,7 @@ AS_MESSAGE([checking  for EXT2/3 Library and Header files ... ...])
 AC_CHECK_HEADERS([ext2fs/ext2fs.h], ,
   AC_MSG_ERROR([*** EXT2/3 header files (ext2fs/ext2fs.h) not found])
 )
-AC_CHECK_LIB([com_err], [com_err])
-AC_CHECK_LIB([ext2fs], [ext2fs_initialize], [],
+AC_CHECK_LIB([ext2fs], [ext2fs_initialize], true,
     AC_MSG_ERROR([*** EXT2/3 library (libext2fs) not found]))
 
 AC_MSG_CHECKING(version of libextfs)
@@ -200,10 +142,10 @@ AS_MESSAGE([checking  for Reiserfs Library and Header files ... ...])
 AC_CHECK_HEADERS([reiserfs/reiserfs.h], ,
     AC_MSG_ERROR([*** reiserfs header files (reiserfs/reiserfs.h) not found])
 )
-AC_CHECK_LIB([dal], [file_dal_open], [],
-    AC_MSG_ERROR([*** Reiserfs depend library (libdal) not found]))
-AC_CHECK_LIB([reiserfs], [reiserfs_fs_open], [],
+AC_CHECK_LIB([reiserfs], [reiserfs_fs_open], true,
     AC_MSG_ERROR([*** Reiserfs library (libreiserfs) not found]))
+AC_CHECK_LIB([dal], [file_dal_open], true,
+    AC_MSG_ERROR([*** Reiserfs depend library (libdal) not found]))
 AC_MSG_CHECKING(version of libreiserfs)
 supported_fs=$supported_fs" reiserfs"
 reiserfs_version="unknown, suggest 0.3.0.5"
@@ -227,7 +169,7 @@ AS_MESSAGE([checking  for Reiser4 Library and Header files ... ...])
 AC_CHECK_HEADERS([reiser4/libreiser4.h], ,
   AC_MSG_ERROR([*** reiser4 header files (reiser4/libreiser4.h) not found])
 )
-AC_CHECK_LIB([aal], [aal_device_open], [],
+AC_CHECK_LIB([aal], [aal_device_open], true,
     AC_MSG_ERROR([*** Reiser4 depend library (libaal) not found]))
 supported_fs=$supported_fs" reiser4"
 reiser4_version="unknown, suggest 1.0.6"
@@ -323,7 +265,7 @@ AC_CHECK_HEADERS([nilfs.h], ,
   AC_MSG_ERROR([*** nilfs2 header files (nilfs.h) not found])
 )
 
-AC_CHECK_LIB([nilfs], [nilfs_open], [],
+AC_CHECK_LIB([nilfs], [nilfs_open], true,
     AC_MSG_ERROR([*** nilfs2 depend library (libnilfs) not found]))
 
 supported_fs=$supported_fs" nilfs2"
@@ -344,10 +286,6 @@ if test "$enable_ntfs" = "yes"; then
     ntfs_3g_l=0
     ntfsprogs_h=0
     ntfsprogs_l=0
-
-    dnl fix the compilation with gcc-14
-    AC_DEFINE(HAVE_TIME_H)
-
     #check library of some filesystems
     dnl Check for NTFS-3g
     AS_MESSAGE([checking  for NTFS-3g Library and Header files ... ...])
@@ -392,7 +330,7 @@ if test "$enable_ufs" = "yes"; then
 
 dnl Check for UFS 
 AS_MESSAGE([checking  for UFS Library ... ...])
-AC_CHECK_LIB([ufs], [ufs_disk_fillout], [],
+AC_CHECK_LIB([ufs], [ufs_disk_fillout], true,
         AC_MSG_ERROR([*** ufs depend library (libufs2) not found]))
 supported_fs=$supported_fs" ufs"
 ufs_version="unknown, suggest 7.0-2"
@@ -415,7 +353,7 @@ dnl Check for VMFS
 ##AC_CHECK_HEADERS([uuid/uuid.h vmfs/vmfs.h], ,
 ##   AC_MSG_ERROR([*** VMFS(vmfs-tools) header not found]))
 AS_MESSAGE([checking for VMFS Library files ... ...])
-AC_CHECK_LIB([vmfs -luuid], [vmfs_host_init], [],
+AC_CHECK_LIB([vmfs -luuid], [vmfs_host_init], true,
         AC_MSG_ERROR([*** vmfs depend library (libvmfs) not found]))
 supported_fs=$supported_fs" vmfs"
 vmfs_version="unknown"
@@ -438,7 +376,7 @@ dnl Check for JFS
 ##AC_CHECK_HEADERS([uuid/uuid.h jfs/jfs_superblock.h], ,
 ##   AC_MSG_ERROR([*** JFS(libjfs) header not found]))
 AS_MESSAGE([checking for JFS Library files ... ...])
-AC_CHECK_LIB([jfs -luuid], [ujfs_get_superblk], [],
+AC_CHECK_LIB([jfs -luuid], [ujfs_get_superblk], true,
         AC_MSG_ERROR([*** jfs depend library (libjfs) not found]))
 supported_fs=$supported_fs" jfs"
 jfs_version="unknown, suggest 1.1.12"
@@ -461,6 +399,9 @@ supported_fs=$supported_fs" btrfs"
 btrfs_version="unknown"
 fi
 
+#condition for CPU target
+AC_CANONICAL_TARGET
+AM_CONDITIONAL([X64], [test "$target_cpu" = x86_64])
 
 #end of check btrfs
 
@@ -498,23 +439,29 @@ AC_CHECK_LIB([ncursesw], [initscr], ,
     AC_MSG_ERROR([*** Ncursesw library (libncursesw5) not found]))
 fi
 
-##libcrypto##
-PKG_CHECK_MODULES([OPENSSL], [openssl],, [AC_MSG_ERROR([openssl not found])])
-PKG_CHECK_MODULES([ZLIB], [zlib],, [AC_MSG_ERROR([zlib not found])])
-PKG_CHECK_MODULES([ZSTD], [libzstd],, [AC_MSG_ERROR([libzstd not found])])
+##libcrypto -- REMOVED##
+## Only use here was SHA-1 for the Clonezilla BitTorrent mode (-t/-T).
+## See src/torrent_helper.c.  Do not re-add these probes without also re-adding
+## -lcrypto in src/Makefile.am
 
 ##libm##
 AC_CHECK_DECLS([isnormal], [], [], [[#include <math.h>]])
 if test "$ac_cv_have_decl_isnormal" = "yes" ; then
-    AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; return isnormal(f)]])],[],[LIBS="$LIBS -lm"])
+    AC_TRY_LINK([#include <math.h>], [float f = 0.0; return isnormal(f)], [], [LIBS="$LIBS -lm"])
 fi
 
-# fix bug #1093194
-AC_CHECK_HEADERS([byteswap.h], ,
-    AC_MSG_ERROR([*** byteswap header file (byteswap.h) not found]))
+##bswap_64()##
+AC_CHECK_HEADERS([byteswap.h])
 
-## libtinfo ##
-AC_CHECK_LIB([tinfo], [setupterm], tinfo=1,
+##static linking##
+AC_ARG_ENABLE([static],
+    AS_HELP_STRING(
+        [--enable-static],
+        [enable static linking])
+)
+AM_CONDITIONAL(ENABLE_STATIC, test "$enable_static" = yes)
+
+AC_CHECK_LIB([tinfo], [initscr], tinfo=1,
     AC_MSG_WARN([*** tinfo library (libtinfo) not found]))
 AM_CONDITIONAL(ENABLE_TINFO, test "$tinfo" = 1)
 
@@ -543,7 +490,7 @@ AM_CONDITIONAL(ENABLE_FEATURE_TEST, test "$enable_feature_test" = yes)
 
 ##bash-completion
 PKG_CHECK_VAR([bashcompletiondir], [bash-completion], [completionsdir], [],
-    [bashcompletiondir='${datadir}/bash-completion/completions'])
+    [bashcompletiondir="${sysconfdir}/bash_completion.d"])
 AC_SUBST(bashcompletiondir)
 
 AC_CONFIG_HEADERS([config.h])
